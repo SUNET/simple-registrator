@@ -4,18 +4,21 @@ import logging
 
 from backends import backends
 
-sys.path.append(".")
-logging.basicConfig(level=logging.DEBUG,
-                    format='%(asctime)s %(levelname)s %(message)s',
-                    stream=sys.stderr)
 
+def main():
+    sys.path.append(".")
+    logging.basicConfig(level=logging.DEBUG,
+                        format='%(asctime)s %(levelname)s %(message)s',
+                        stream=sys.stderr)
 
-docker_client = docker.Client(base_url='unix://var/run/docker.sock')
+    docker_client = docker.Client(base_url='unix://var/run/docker.sock')
 
-for event in docker_client.events():
-    if 'status' in event:
-        status = event['status']
-        info = docker_client.inspect_container(container=event['container'])
-        for backend in backends:
-            if hasattr(backend,status):
-                getattr(backend, status)(info)
+    for event in docker_client.events():
+        if 'status' in event:
+            status = event['status']
+            info = docker_client.inspect_container(container=event['container'])
+            for backend in backends:
+                if hasattr(backend, status):
+                    cb = getattr(backend, status)
+                    if cb and hasattr(cb,'__call__'):
+                        cb(info)

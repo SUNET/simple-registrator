@@ -1,6 +1,6 @@
 import os
 import etcd
-from . import backend
+from backends import backend
 
 
 @backend(name="etcd")

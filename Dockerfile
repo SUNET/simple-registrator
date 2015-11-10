@@ -6,4 +6,4 @@ RUN apt-get -y install wget python python-dev python-pip git-core
 COPY src /app
 WORKDIR /app
 RUN pip install -r requirements.txt
-ENTRYPOINT python vulcan-registrator.py
+ENTRYPOINT python registrator.py
