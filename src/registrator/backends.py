@@ -1,3 +1,5 @@
+from threading import Thread
+
 registry = dict()
 
 
@@ -21,3 +23,10 @@ def backend(*args, **kwargs):
 
 def backends():
     return registry.values()
+
+
+def monitor(task, *args, **kwargs):
+    t = Thread(target=task, args=args, kwargs=kwargs)
+    t.start()
+    return t
+
