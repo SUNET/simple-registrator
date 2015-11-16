@@ -2,9 +2,13 @@ import os
 import etcd
 from backends import backend, monitor
 from time import sleep
+import logging
+import pprint
+
+logger = logging.getLogger(__name__)
 
 
-@backend(name="etcd")
+@backend(name='etcd')
 class Etcd(object):
 
     def __init__(self):
@@ -15,14 +19,14 @@ class Etcd(object):
         self.client.set()
 
 
-@backend(name="log")
+@backend(name='log', enabled=False)
 class Log(object):
 
     def __call__(self, *args, **kwargs):
-        print args[0]
+        logger.debug('Docker event:\n{!s}'.format(pprint.pformat(args[0])))
 
 
-@backend(name="monitor_test")
+@backend(name='monitor_test')
 class TestMonitor(object):
 
     def __init__(self):
