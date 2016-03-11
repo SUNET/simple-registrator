@@ -63,3 +63,12 @@ def main():
             logger.exception('Docker inspect with {!r} failed'.format(event))
             continue
         _do_status(event['status'], info)
+
+
+if __name__ == '__main__':
+    try:
+        if main():
+            sys.exit(0)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        sys.exit(0)

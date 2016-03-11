@@ -3,9 +3,7 @@
 
 from distutils.core import setup
 from os.path import abspath, dirname, join
-from platform import python_implementation
 from setuptools import find_packages
-from sys import version_info
 
 __author__ = 'Leif Johansson'
 __version__ = '0.0.1'
@@ -14,8 +12,9 @@ here = abspath(dirname(__file__))
 README = open(join(here, 'README.rst')).read()
 
 install_requires = [
-    'futures',
-    'requests'
+    'python-etcd',
+    'docker-py',
+    'simplejson>=3.6.5',
 ]
 
 setup(name='registrator',
@@ -43,6 +42,5 @@ setup(name='registrator',
       },
       message_extractors={'src': [
           ('**.py', 'python', None),
-          ('**/templates/**.html', 'mako', None),
       ]},
 )
