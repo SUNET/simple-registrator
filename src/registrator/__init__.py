@@ -59,22 +59,12 @@ def _do_status(status, docker):
             logger.exception('Backend {!r} failed status()'.format(backend))
 
 
-def main():
-    level = logging.INFO
-    if '--debug' in sys.argv or os.environ.get('REGISTRATOR_DEBUG'):
-        level = logging.DEBUG
-    sys.path.append(".")
-    logging.basicConfig(level=level,
-                        format='%(asctime)s %(levelname)s %(message)s',
-                        stream=sys.stderr)
-
-    docker_client = docker.Client(base_url='unix://var/run/docker.sock')
-
-    logger.info('Simple registrator started, listening for docker events')
-
+def loop(docker_client, logger, level):
+    logger.info('Listening for docker events on {!r}'.format(docker_client))
     # on startup, inform all the backends about the already running containers
     for container in docker_client.containers(filters=dict(status='running')):
-        _do_status('running', container)
+        info = Docker(logger, level, docker_client, container['Id'])
+        _do_status('running', info)
 
     for event in docker_client.events():
         if isinstance(event, basestring):
@@ -107,6 +97,20 @@ def main():
 
         info = Docker(logger, level, docker_client, event['id'])
         _do_status(event['status'], info)
+
+
+def main():
+    level = logging.INFO
+    if '--debug' in sys.argv or os.environ.get('REGISTRATOR_DEBUG'):
+        level = logging.DEBUG
+    sys.path.append(".")
+    logging.basicConfig(level=level,
+                        format='%(asctime)s %(levelname)s %(message)s',
+                        stream=sys.stderr)
+
+    docker_client = docker.Client(base_url='unix://var/run/docker.sock')
+
+    loop(docker_client, logger, level)
 
 
 if __name__ == '__main__':
