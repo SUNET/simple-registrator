@@ -1,6 +1,6 @@
 import os
 import etcd
-from backends import backend, monitor
+from backends import backend
 from time import sleep
 import logging
 import pprint
@@ -21,14 +21,23 @@ class Etcd(object):
         self.hostname = os.environ.get('REGISTRATOR_HOSTNAME', socket.gethostname())
         self.ipv4 = os.environ.get('REGISTRATOR_HOSTIPV4', socket.gethostbyname(self.hostname))
         self.threads = dict()
+        prefix_s = os.environ.get('REGISTRATOR_ETCD_NAME_STRIP_PREFIXES', 'docker.sunet.se/')
+        self.name_strip_prefixes = prefix_s.split(',')
+        self.timeout = int(os.environ.get('REGISTRATOR_ETCD_TIMEOUT', '300'))
+        self.ns = os.environ.get('REGISTRATOR_ETCD_NS', '/simple-registrator/')
 
     def start(self, info):
-        image_name = info['Config']['Image']
-        ns = os.environ.get('REGISTRATOR_ETCD_NS', '/simple-registrator/')
-        key = '{!s}{!s}/{!s}/'.format(ns, image_name, info['Id'])
+        """
+        A new container has been started.
+
+        :param info: Docker inspect of the container.
+        :return:
+        """
+        key = self._get_key(info)
 
         # Assemble all the data that needs to be periodically stored in etcd
         _write = {
+            key + 'image_name': info['Config']['Image'],
             key + 'image_id': info['Image'],
             key + 'dockerhost_name': self.hostname,
             key + 'dockerhost_ipv4': self.ipv4,
@@ -50,11 +59,17 @@ class Etcd(object):
 
         # Start a thread that will periodically store the data in etcd. The purpose
         # of the TTL and thread is to have the data disappear if the simple-registrator
-        _update_t = EtcdPeriodicUpdater(key, _write, self._set, logger)
+        _update_t = EtcdPeriodicUpdater(key, _write, self._set, logger, self.timeout)
         _update_t.start()
         self.threads[info['Id']] = _update_t
 
     def die(self, info):
+        """
+        A container is shutting down.
+
+        :param info: Docker inspect of the container.
+        :return:
+        """
         # First, signal the update thread to stop. The thread might be asleep for a while,
         # but will not update etcd again after it wakes up if thread.done is True.
         _update_t = self.threads[info['Id']]
@@ -62,14 +77,35 @@ class Etcd(object):
         del self.threads[info['Id']]
 
         # Now, remove all keys from etcd without waiting for the update thread to wake up
-        image_name = info['Config']['Image']
-        ns = os.environ.get('REGISTRATOR_ETCD_NS', '/simple-registrator/')
-        key = '{!s}{!s}/{!s}/'.format(ns, image_name, info['Id'])
-        logger.debug('Deleting everything under {!s} in {!s}'.format(key, self.client))
+        key = self._get_key(info)
         self._delete(key, recursive=True)
 
     def running(self, info):
+        """
+        This is the status function for containers discovered running when the
+        simple registrator starts.
+
+        :param info: Docker inspect of the container.
+        :return:
+        """
         self.start(info)
+
+    def _get_key(self, info):
+        """
+        etcd key prefix for this container.
+
+        :param info: Docker inspect of the container.
+
+        :return: etcd key prefix
+        :rtype: str | unicode
+        """
+        name = info['Config']['Image']
+        for this in self.name_strip_prefixes:
+            if name.startswith(this):
+                name = name[len(this):]
+        name, tag = name.split(':')
+        key = '{!s}{!s}/{!s}/{!s}/'.format(self.ns, name, tag, info['Id'])
+        return key
 
     def _format_exposed_port(self, ns, port, data):
         if 'HostIp' not in data or 'HostPort' not in data:
@@ -102,14 +138,14 @@ class Etcd(object):
 
 class EtcdPeriodicUpdater(threading.Thread):
 
-    def __init__(self, ns, data, set_function, logger, **kwargs):
+    def __init__(self, ns, data, set_function, logger, timeout, **kwargs):
         super(EtcdPeriodicUpdater, self).__init__(**kwargs)
 
         self.ns = ns
         self.data = data
         self._set = set_function
         self.logger = logger
-        self.timeout = kwargs.get('timeout', 30)
+        self.timeout = timeout
 
         self.done = False
 
@@ -122,7 +158,6 @@ class EtcdPeriodicUpdater(threading.Thread):
 
     def _update(self):
         logger.debug('Updating {!s}:\n{!s}'.format(self.ns, pprint.pformat(self.data)))
-        #self._set(self.ns, None, dir=True, ttl=self.timeout * 2)
         for key, value in self.data.items():
             self._set(key, value, ttl=self.timeout * 2)
 
