@@ -1,5 +1,3 @@
-from threading import Thread
-
 import os
 import logging
 
@@ -33,10 +31,3 @@ def backend(*args, **kwargs):
 
 def get_backends():
     return registry.values()
-
-
-def monitor(task, *args, **kwargs):
-    t = Thread(target=task, args=args, kwargs=kwargs)
-    t.start()
-    return t
-
