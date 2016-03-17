@@ -37,31 +37,59 @@ class Etcd(object):
 
         # Assemble all the data that needs to be periodically stored in etcd
         _write = {
-            key + 'image_name': info['Config']['Image'],
-            key + 'image_id': info['Image'],
-            key + 'dockerhost_name': self.hostname,
-            key + 'dockerhost_ipv4': self.ipv4,
+            key + '/image_name': info['Config']['Image'],
+            key + '/image_id': info['Image'],
+            key + '/dockerhost_name': self.hostname,
+            key + '/dockerhost_ipv4': self.ipv4,
         }
+        # Record container IP addresses
+        if 'IPAddress' in info['NetworkSettings'] and info['NetworkSettings']['IPAddress']:
+            _write['ipv4_address'] = info['NetworkSettings']['IPAddress']
+        if 'GlobalIPv6Address' in info['NetworkSettings'] and info['NetworkSettings']['GlobalIPv6Address']:
+            # info['NetworkSettings']['GlobalIPv6Address'] is '' if IPv6 is not used
+            _write['ipv6_address'] = info['NetworkSettings']['GlobalIPv6Address']
+        # Gather all ports data
         if 'Ports' in info['NetworkSettings']:
-            for port in info['NetworkSettings']['Ports']:
-                if info['NetworkSettings']['Ports'][port] is None:
-                    # a port that is not exposed, register it with the containers IP
-                    data = {'HostIp': '',
-                            'HostPort': port,
-                            }
-                    _k, _v = self._format_exposed_port(key, port, data)
-                    _write[_k] = _v
-                    continue
-                for data in info['NetworkSettings']['Ports'][port]:
-                    logger.debug('Processing exposed port: {!r}'.format(data))
-                    _k, _v = self._format_exposed_port(key, port, data)
-                    _write[_k] = _v
+            self._gather_ports_data(key, _write, info['NetworkSettings']['Ports'])
+        # Gather data about networks
+        if 'Networks' in info['NetworkSettings']:
+            self._gather_networks_data(key, _write, info['NetworkSettings']['Networks'])
 
         # Start a thread that will periodically store the data in etcd. The purpose
         # of the TTL and thread is to have the data disappear if the simple-registrator
         _update_t = EtcdPeriodicUpdater(key, _write, self._set, logger, self.timeout)
         _update_t.start()
         self.threads[info['Id']] = _update_t
+
+    def _gather_ports_data(self, key, _write, ports):
+        for port_proto in ports:
+            logger.debug('Processing port {!r}'.format(port_proto))
+            port, proto = port_proto.split('/')
+            if ports[port_proto] is None:
+                # List this port as open on the container IP. It is not guaranteed to actually be open though.
+                port_key = '{!s}/ports/listed/{!s}/{!s}'.format(key, proto, port)
+                _write[port_key] = _write.get('ipv4_address', '')
+            else:
+                # If it is not None, this is a list of dicts like [{u'HostIp': u'0.0.0.0', u'HostPort': u'2379'}]
+                port_key = '{!s}/ports/exposed/{!s}/{!s}'.format(key, proto, port)
+                for this in ports[port_proto]:
+                    _host_ip = this['HostIp']
+                    if _host_ip == '0.0.0.0':
+                        _host_ip = self.ipv4
+                    _host_port = this['HostPort']
+                    _write[port_key + '/host_ip'] = _host_ip
+                    _write[port_key + '/host_port'] = _host_port
+
+    def _gather_networks_data(self, key, _write, networks):
+        for name, data in networks.items():
+            logger.debug('Processing network {!r}'.format(data))
+            net_key = '{!s}/networks/{!s}'.format(key, name)
+            for src, dst in [('GlobalIPv6Address', 'ipv6_address'),
+                             ('IPAddress', 'ipv4_address'),
+                             ('MacAddress', 'mac_address'),
+                             ('NetworkID', 'network_id')]:
+                if src in data and data[src]:
+                    _write[net_key + '/' + dst] = data[src]
 
     def die(self, info):
         """
@@ -103,25 +131,14 @@ class Etcd(object):
         for this in self.name_strip_prefixes:
             if name.startswith(this):
                 name = name[len(this):]
-        name, tag = name.split(':')
-        key = '{!s}{!s}/{!s}/{!s}/'.format(self.ns, name, tag, info['Id'])
-        return key
-
-    def _format_exposed_port(self, ns, port, data):
-        if 'HostIp' not in data or 'HostPort' not in data:
-            return
-        hostip = data['HostIp']
-        if hostip == '0.0.0.0':
-            hostip = self.ipv4
-        hostport = data['HostPort']
-        if ':' in hostip:
-            # guess it is ipv6
-            where = '[{!s}]:{!s}'.format(hostip, hostport)
+        while name.startswith('/'):
+            name = name[1:]
+        if ':' in name:
+            name, tag = name.split(':')
         else:
-            where = '{!s}:{!s}'.format(hostip, hostport)
-        # port is something like 4711/tcp, replace slash with underscore
-        port_key = ns + 'port_{!s}'.format(port.replace('/', '_'))
-        return port_key, where
+            tag = 'unknown'
+        key = '{!s}{!s}/{!s}/{!s}'.format(self.ns, name, tag, info['Id'])
+        return key
 
     def _set(self, key, value, **kwargs):
         if 'dir' in kwargs and kwargs['dir']:
@@ -137,6 +154,12 @@ class Etcd(object):
 
 
 class EtcdPeriodicUpdater(threading.Thread):
+    """
+    Thread for updating data (with TTL) about a container.
+
+    The idea is to not write data without a TTL into etcd, in case the
+    registrator or the host it runs on crashes.
+    """
 
     def __init__(self, ns, data, set_function, logger, timeout, **kwargs):
         super(EtcdPeriodicUpdater, self).__init__(**kwargs)
