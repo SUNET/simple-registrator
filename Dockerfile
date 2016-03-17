@@ -8,4 +8,4 @@ RUN apt-get update && apt-get -y dist-upgrade && apt-get -y install wget python 
 COPY . /app
 RUN cd /app && python setup.py install
 
-ENTRYPOINT /usr/local/bin/registrator
+ENTRYPOINT ["/usr/local/bin/registrator"]
