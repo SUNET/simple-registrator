@@ -101,7 +101,7 @@ def loop(docker_client, logger, level):
 
 def main():
     level = logging.INFO
-    if '--debug' in sys.argv or os.environ.get('REGISTRATOR_DEBUG'):
+    if '--debug' in sys.argv or os.environ.get('REGISTRATOR_DEBUG', '0').lower() in ['true', 'yes', '1']:
         level = logging.DEBUG
     sys.path.append(".")
     logging.basicConfig(level=level,
