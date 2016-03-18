@@ -100,7 +100,10 @@ class Etcd(object):
         """
         # First, signal the update thread to stop. The thread might be asleep for a while,
         # but will not update etcd again after it wakes up if thread.done is True.
-        _update_t = self.threads[info['Id']]
+        _update_t = self.threads.get(info['Id'])
+        if not _update_t:
+            logger.error('Container {!r} not found in our list'.format(info['Id']))
+            return
         _update_t.done = True
         del self.threads[info['Id']]
 
@@ -169,8 +172,9 @@ class EtcdPeriodicUpdater(threading.Thread):
         self._set = set_function
         self.logger = logger
         self.timeout = timeout
-
         self.done = False
+        logger.info('Registering new docker container: {!s}'.format(ns))
+        logger.debug('Entering data for new container into etcd:\n{!r}'.format(data))
 
     def run(self):
         self._update()
