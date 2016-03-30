@@ -62,6 +62,9 @@ class Etcd(object):
         self.threads[info['Id']] = _update_t
 
     def _gather_ports_data(self, key, _write, ports):
+        if ports is None:
+            logger.debug('Container has no ports')
+            return
         for port_proto in ports:
             logger.debug('Processing port {!r}'.format(port_proto))
             port, proto = port_proto.split('/')
